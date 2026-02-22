@@ -138,6 +138,11 @@ socket.on('botStarted', function(data) {
     botState.qsoState = data.qsoState.state;
     botState.isActive = true;
     updateBotDisplay();
+    
+    // NOUVEAU: Afficher le callsign utilisé
+    if (data.userCallsign) {
+        addSystemMessage('📡 Bot initialisé avec votre indicatif: ' + data.userCallsign);
+    }
 });
 
 socket.on('botMessage', function(data) {
@@ -152,6 +157,14 @@ socket.on('botMessage', function(data) {
     
     if (data.morse) {
         playReceivedMorse(data.morse);
+    }
+    
+    // NOUVEAU: Afficher les infos de callsign en mode debug
+    if (config.showBotAnalysis && data.userCallsignInfo) {
+        var info = data.userCallsignInfo;
+        if (info.match) {
+            console.log('Callsign match confirmed:', info.configured);
+        }
     }
 });
 
@@ -182,9 +195,28 @@ socket.on('messageAnalysis', function(analysis) {
         if (analysis.detected.isGreeting) detected.push('Greeting');
         if (analysis.detected.isReport) detected.push('Report');
         if (analysis.detected.isClosing) detected.push('Closing');
+        if (analysis.detected.isCallingBot) detected.push('Calling Bot');
         
         if (detected.length > 0) {
             addSystemMessage('📊 Détecté: ' + detected.join(', '));
+        }
+        
+        // NOUVEAU: Afficher la validation du callsign
+        if (analysis.userCallsignValidation) {
+            var validation = analysis.userCallsignValidation;
+            
+            if (validation.detected) {
+                if (validation.match) {
+                    addSystemMessage('✅ Callsign valide: ' + validation.detected);
+                } else {
+                    addSystemMessage('⚠️ Callsign détecté: ' + validation.detected + 
+                        ' (configuré: ' + validation.configured + ')');
+                }
+            }
+            
+            if (validation.foundInMessage) {
+                addSystemMessage('📡 Votre indicatif trouvé dans le message');
+            }
         }
     }
 });
