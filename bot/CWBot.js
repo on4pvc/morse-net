@@ -1,6 +1,6 @@
 /**
- * Bot CW Intelligent
- * Gère les interactions avec les utilisateurs en simulant des QSO réalistes
+ * Bot CW Intelligent v1.1
+ * Avec détection du callsign utilisateur
  */
 
 const procedures = require('./procedures');
@@ -10,8 +10,8 @@ const QSOStateMachine = require('./QSOStateMachine');
 class CWBot {
     constructor(options = {}) {
         this.options = {
-            speed: options.speed || 'normal',  // slow, normal, fast
-            difficulty: options.difficulty || 'beginner', // beginner, intermediate, advanced
+            speed: options.speed || 'normal',
+            difficulty: options.difficulty || 'beginner',
             qsoType: options.qsoType || 'casual',
             autoRespond: options.autoRespond !== false,
             responseDelay: options.responseDelay || { min: 2000, max: 5000 },
@@ -23,17 +23,31 @@ class CWBot {
         this.lastUserMessage = null;
         this.pendingResponse = null;
         this.messageCallback = null;
+        
+        // NOUVEAU: Callsign de l'utilisateur
+        this.userCallsign = options.userCallsign || null;
     }
     
     // ========== CONFIGURATION ==========
     
-    // Sélectionner un profil de bot aléatoire
+    // NOUVEAU: Définir le callsign de l'utilisateur
+    setUserCallsign(callsign) {
+        if (callsign && typeof callsign === 'string') {
+            this.userCallsign = callsign.toUpperCase().trim();
+            console.log('[BOT] User callsign set to:', this.userCallsign);
+        }
+    }
+    
+    // NOUVEAU: Obtenir le callsign de l'utilisateur
+    getUserCallsign() {
+        return this.userCallsign;
+    }
+    
     selectRandomProfile() {
         const profiles = responses.BOT_PROFILES;
         return profiles[Math.floor(Math.random() * profiles.length)];
     }
     
-    // Changer de profil
     changeProfile(callsign = null) {
         if (callsign) {
             const profile = responses.BOT_PROFILES.find(p => p.callsign === callsign);
@@ -46,14 +60,12 @@ class CWBot {
         return this.profile;
     }
     
-    // Définir le callback pour les messages
     onMessage(callback) {
         this.messageCallback = callback;
     }
     
     // ========== ANALYSE DES MESSAGES ==========
     
-    // Analyser le message de l'utilisateur
     analyzeMessage(text) {
         const upperText = text.toUpperCase().trim();
         const words = upperText.split(/\s+/);
@@ -72,13 +84,24 @@ class CWBot {
                 isConfirmation: false,
                 isClosing: false,
                 isRepeatRequest: false,
-                hasCallsign: false
+                hasCallsign: false,
+                hasBotCallsign: false,      // NOUVEAU: Détecte si le callsign du bot est mentionné
+                hasUserCallsign: false,      // NOUVEAU: Détecte si le callsign de l'utilisateur est présent
+                userCallsignMatch: false,    // NOUVEAU: Le callsign extrait correspond au callsign configuré
+                isCallingBot: false          // NOUVEAU: L'utilisateur appelle spécifiquement le bot
             },
             extracted: {
                 callsign: null,
+                callsigns: [],              // NOUVEAU: Tous les callsigns trouvés
                 name: null,
                 qth: null,
                 rst: null
+            },
+            // NOUVEAU: Informations sur le callsign utilisateur
+            userCallsignInfo: {
+                configured: this.userCallsign,
+                foundInMessage: false,
+                matchesConfigured: false
             }
         };
         
@@ -93,7 +116,10 @@ class CWBot {
         analysis.detected.isClosing = this.containsKeywords(upperText, procedures.KEYWORDS.closing);
         analysis.detected.isRepeatRequest = this.containsKeywords(upperText, procedures.KEYWORDS.repeat);
         
-        // Extraire les informations
+        // NOUVEAU: Extraire TOUS les callsigns
+        analysis.extracted.callsigns = this.extractAllCallsigns(upperText);
+        
+        // Extraire le callsign principal (premier qui n'est pas le bot)
         analysis.extracted.callsign = this.extractCallsign(upperText);
         analysis.extracted.name = this.extractName(upperText);
         analysis.extracted.qth = this.extractQTH(upperText);
@@ -103,10 +129,32 @@ class CWBot {
             analysis.detected.hasCallsign = true;
         }
         
+        // NOUVEAU: Vérifier si le callsign du bot est mentionné
+        if (this.profile && this.profile.callsign) {
+            analysis.detected.hasBotCallsign = analysis.extracted.callsigns.includes(this.profile.callsign);
+            
+            // L'utilisateur appelle le bot s'il mentionne son callsign suivi de DE
+            const callingPattern = new RegExp(this.profile.callsign + '\\s+(DE|D E)\\s+', 'i');
+            analysis.detected.isCallingBot = callingPattern.test(upperText);
+        }
+        
+        // NOUVEAU: Vérifier le callsign de l'utilisateur
+        if (this.userCallsign) {
+            analysis.userCallsignInfo.configured = this.userCallsign;
+            analysis.userCallsignInfo.foundInMessage = analysis.extracted.callsigns.includes(this.userCallsign);
+            
+            // Vérifier si le callsign extrait correspond au callsign configuré
+            if (analysis.extracted.callsign) {
+                analysis.userCallsignInfo.matchesConfigured = (analysis.extracted.callsign === this.userCallsign);
+                analysis.detected.userCallsignMatch = analysis.userCallsignInfo.matchesConfigured;
+            }
+            
+            analysis.detected.hasUserCallsign = analysis.userCallsignInfo.foundInMessage;
+        }
+        
         return analysis;
     }
     
-    // Vérifier si le texte contient des mots-clés
     containsKeywords(text, keywords) {
         return keywords.some(keyword => {
             const regex = new RegExp('\\b' + keyword.replace(/[?]/g, '\\?') + '\\b', 'i');
@@ -114,9 +162,18 @@ class CWBot {
         });
     }
     
-    // Extraire un indicatif
+    // NOUVEAU: Extraire tous les callsigns
+    extractAllCallsigns(text) {
+        const callsignRegex = /\b([A-Z]{1,2}[0-9][A-Z]{1,4}|[0-9][A-Z][0-9][A-Z]{1,4})\b/gi;
+        const matches = text.match(callsignRegex);
+        
+        if (matches) {
+            return [...new Set(matches.map(call => call.toUpperCase()))];
+        }
+        return [];
+    }
+    
     extractCallsign(text) {
-        // Pattern pour indicatifs amateur (ex: F4ABC, DL2XYZ, W1AW, VK2ABC)
         const callsignRegex = /\b([A-Z]{1,2}[0-9][A-Z]{1,4}|[0-9][A-Z][0-9][A-Z]{1,4})\b/gi;
         const matches = text.match(callsignRegex);
         
@@ -130,7 +187,6 @@ class CWBot {
         return null;
     }
     
-    // Extraire un nom
     extractName(text) {
         const patterns = [
             /NAME\s+(?:IS\s+)?([A-Z]{2,12})/i,
@@ -148,7 +204,6 @@ class CWBot {
         return null;
     }
     
-    // Extraire un QTH
     extractQTH(text) {
         const patterns = [
             /QTH\s+(?:IS\s+)?(?:IN\s+)?([A-Z]{2,20})/i,
@@ -165,7 +220,6 @@ class CWBot {
         return null;
     }
     
-    // Extraire un RST
     extractRST(text) {
         const patterns = [
             /RST\s+([0-9]{3})/i,
@@ -185,15 +239,23 @@ class CWBot {
     
     // ========== GÉNÉRATION DE RÉPONSES ==========
     
-    // Traiter un message utilisateur et générer une réponse
     processUserMessage(text) {
         this.lastUserMessage = text;
         const analysis = this.analyzeMessage(text);
         
-        // Mettre à jour les infos utilisateur
+        // NOUVEAU: Mise à jour des infos utilisateur avec validation du callsign
         if (analysis.extracted.callsign) {
-            this.qso.setUserInfo({ callsign: analysis.extracted.callsign });
+            // Utiliser le callsign configuré si disponible et correspondant
+            if (this.userCallsign && analysis.detected.hasUserCallsign) {
+                this.qso.setUserInfo({ callsign: this.userCallsign });
+            } else if (analysis.extracted.callsign) {
+                this.qso.setUserInfo({ callsign: analysis.extracted.callsign });
+            }
+        } else if (this.userCallsign && !this.qso.userInfo.callsign) {
+            // Utiliser le callsign configuré par défaut
+            this.qso.setUserInfo({ callsign: this.userCallsign });
         }
+        
         if (analysis.extracted.name) {
             this.qso.setUserInfo({ name: analysis.extracted.name });
         }
@@ -204,7 +266,6 @@ class CWBot {
             this.qso.setUserInfo({ rst: analysis.extracted.rst });
         }
         
-        // Générer la réponse basée sur l'état du QSO et l'analyse
         const response = this.generateResponse(analysis);
         
         return {
@@ -214,17 +275,24 @@ class CWBot {
         };
     }
     
-    // Générer une réponse contextuelle
     generateResponse(analysis) {
         const state = this.qso.state;
         const phases = procedures.QSO_PHASES;
         let responseText = '';
         let nextState = state;
         
+        // NOUVEAU: Utiliser le callsign configuré si disponible
+        const userCall = this.userCallsign || this.qso.userInfo.callsign || 'OM';
+        
         // Si pas de QSO actif et l'utilisateur appelle CQ
         if (!this.qso.isActive() && analysis.detected.isCQ) {
-            // Le bot répond à l'appel CQ
             this.qso.startQSO(this.profile, this.options.qsoType);
+            
+            // NOUVEAU: Utiliser le callsign configuré
+            if (this.userCallsign) {
+                this.qso.setUserInfo({ callsign: this.userCallsign });
+            }
+            
             this.qso.transition(phases.RECEIVED_CALL);
             responseText = this.generateAnswerToCQ(analysis);
             nextState = phases.SENDING_REPORT;
@@ -232,21 +300,34 @@ class CWBot {
         // Si pas de QSO actif, le bot lance un CQ
         else if (!this.qso.isActive()) {
             this.qso.startQSO(this.profile, this.options.qsoType);
+            
+            // NOUVEAU: Utiliser le callsign configuré
+            if (this.userCallsign) {
+                this.qso.setUserInfo({ callsign: this.userCallsign });
+            }
+            
             responseText = this.generateCQCall();
             nextState = phases.WAITING_ANSWER;
         }
-        // Gérer selon l'état actuel
         else {
             switch (state) {
                 case phases.CALLING_CQ:
                 case phases.WAITING_ANSWER:
-                    if (analysis.detected.hasCallsign || analysis.detected.isGreeting) {
-                        // L'utilisateur répond au CQ
+                    // NOUVEAU: Vérifier si l'utilisateur utilise son bon callsign
+                    if (analysis.detected.hasCallsign || analysis.detected.isGreeting || analysis.detected.isCallingBot) {
                         this.qso.transition(phases.RECEIVED_CALL);
+                        
+                        // NOUVEAU: Feedback si le callsign ne correspond pas
+                        if (this.userCallsign && analysis.extracted.callsign && 
+                            analysis.extracted.callsign !== this.userCallsign) {
+                            // L'utilisateur a tapé un callsign différent de celui configuré
+                            console.log('[BOT] Warning: User typed different callsign:', 
+                                analysis.extracted.callsign, 'vs configured:', this.userCallsign);
+                        }
+                        
                         responseText = this.generateAcknowledgment(analysis);
                         nextState = phases.SENDING_REPORT;
                     } else {
-                        // Répéter le CQ
                         responseText = this.generateCQCall();
                     }
                     break;
@@ -260,7 +341,6 @@ class CWBot {
                     
                 case phases.RECEIVING_REPORT:
                     if (analysis.detected.isReport || analysis.detected.hasName || analysis.detected.hasQTH) {
-                        // L'utilisateur a envoyé son rapport
                         this.qso.incrementExchange();
                         
                         if (this.options.qsoType === 'contest' || this.options.qsoType === 'dx') {
@@ -304,7 +384,6 @@ class CWBot {
                     break;
                     
                 case phases.ENDED:
-                    // QSO terminé, reset pour le prochain
                     this.qso.reset();
                     this.changeProfile();
                     responseText = null;
@@ -319,27 +398,30 @@ class CWBot {
         return {
             text: responseText,
             morse: responseText ? this.textToMorse(responseText) : null,
-            state: this.qso.state
+            state: this.qso.state,
+            // NOUVEAU: Informations sur le callsign utilisateur
+            userCallsignInfo: {
+                configured: this.userCallsign,
+                detected: this.qso.userInfo.callsign,
+                match: this.userCallsign && this.qso.userInfo.callsign === this.userCallsign
+            }
         };
     }
     
     // ========== GÉNÉRATEURS DE MESSAGES ==========
     
-    // Générer un appel CQ
     generateCQCall() {
         const templates = procedures.CQ_CALLS[this.options.qsoType === 'contest' ? 'contest' : 'standard'];
         const template = templates[Math.floor(Math.random() * templates.length)];
         return this.fillTemplate(template);
     }
     
-    // Générer une réponse à un CQ de l'utilisateur
     generateAnswerToCQ(analysis) {
         const templates = procedures.ANSWER_TEMPLATES.toUserCQ;
         const template = templates[Math.floor(Math.random() * templates.length)];
         return this.fillTemplate(template);
     }
     
-    // Générer un accusé de réception
     generateAcknowledgment(analysis) {
         const style = this.profile.style || 'friendly';
         const greetings = responses.STYLE_RESPONSES[style].greeting;
@@ -351,7 +433,6 @@ class CWBot {
         return `${this.fillTemplate(template)} ${greeting}`;
     }
     
-    // Générer un rapport signal
     generateReport() {
         let templates;
         
@@ -370,27 +451,25 @@ class CWBot {
         return this.fillTemplate(template);
     }
     
-    // Demander le rapport à l'utilisateur
     generatePromptForReport() {
         const prompts = [
             'UR RST? NAME? QTH?',
             'PSE UR INFO',
-            'HW CPY? UR RST ES NAME?'
+            'HW CPY? UR RST ES NAME?',
+            '{usercall} UR RST?'
         ];
-        return prompts[Math.floor(Math.random() * prompts.length)];
+        const prompt = prompts[Math.floor(Math.random() * prompts.length)];
+        return this.fillTemplate(prompt);
     }
     
-    // Générer une conversation
     generateConversation(analysis) {
         const parts = [];
         
-        // Accusé de réception
         if (analysis.detected.isReport || analysis.detected.hasName) {
             const confirms = procedures.CONFIRMATIONS.understood;
             parts.push(confirms[Math.floor(Math.random() * confirms.length)]);
         }
         
-        // Ajouter un commentaire ou une question
         if (Math.random() > 0.5) {
             const questions = responses.CONVERSATION.questions;
             parts.push(questions[Math.floor(Math.random() * questions.length)]);
@@ -399,13 +478,11 @@ class CWBot {
             parts.push(comments[Math.floor(Math.random() * comments.length)]);
         }
         
-        // Terminer
         parts.push(this.fillTemplate('{usercall} DE {mycall} K'));
         
         return parts.join(' ');
     }
     
-    // Répondre à une question
     generateAnswer(analysis) {
         const text = analysis.normalized;
         let answer = '';
@@ -424,7 +501,6 @@ class CWBot {
         return answer;
     }
     
-    // Générer la clôture
     generateClosing() {
         const thanks = procedures.CLOSING.thanks;
         const thankYou = thanks[Math.floor(Math.random() * thanks.length)];
@@ -432,7 +508,6 @@ class CWBot {
         return `${this.fillTemplate(thankYou)} ${this.generateFarewell()}`;
     }
     
-    // Générer les adieux
     generateFarewell() {
         let templates;
         
@@ -448,11 +523,13 @@ class CWBot {
     
     // ========== UTILITAIRES ==========
     
-    // Remplir un template avec les variables
     fillTemplate(template, extraVars = {}) {
+        // NOUVEAU: Utiliser le callsign configuré en priorité
+        const userCall = this.userCallsign || this.qso.userInfo.callsign || 'OM';
+        
         const vars = {
             mycall: this.profile.callsign,
-            usercall: this.qso.userInfo.callsign || 'OM',
+            usercall: userCall,
             name: this.profile.name,
             qth: this.profile.qth,
             country: this.profile.country,
@@ -472,7 +549,6 @@ class CWBot {
         return result;
     }
     
-    // Convertir texte en morse
     textToMorse(text) {
         const morseTable = {
             'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.',
@@ -493,41 +569,51 @@ class CWBot {
     
     // ========== API PUBLIQUE ==========
     
-    // Démarrer un nouveau QSO (le bot appelle CQ)
-    startNewQSO() {
+    // MODIFIÉ: Accepte le callsign utilisateur
+    startNewQSO(userCallsign = null) {
         this.changeProfile();
+        
+        // NOUVEAU: Définir le callsign utilisateur
+        if (userCallsign) {
+            this.setUserCallsign(userCallsign);
+        }
+        
         const response = this.generateResponse({ detected: {}, extracted: {} });
         return {
             botProfile: this.profile,
             response,
-            qsoState: this.qso.getState()
+            qsoState: this.qso.getState(),
+            userCallsign: this.userCallsign
         };
     }
     
-    // Recevoir un message de l'utilisateur
     receiveMessage(text) {
         return this.processUserMessage(text);
     }
     
-    // Obtenir l'état actuel
     getState() {
         return {
             profile: this.profile,
             qso: this.qso.getState(),
-            options: this.options
+            options: this.options,
+            userCallsign: this.userCallsign  // NOUVEAU
         };
     }
     
-    // Réinitialiser le bot
     reset() {
         this.qso.reset();
         this.changeProfile();
         this.lastUserMessage = null;
+        // Note: on garde le userCallsign
     }
     
-    // Configurer les options
     setOptions(options) {
         this.options = { ...this.options, ...options };
+        
+        // NOUVEAU: Mettre à jour le callsign si fourni
+        if (options.userCallsign) {
+            this.setUserCallsign(options.userCallsign);
+        }
     }
 }
 
