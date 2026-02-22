@@ -1224,3 +1224,42 @@ select option {
         display: none;
     }
 }
+/* ========== CALLSIGN VALIDATION BADGES ========== */
+.callsign-valid {
+    color: #0f0;
+}
+
+.callsign-warning {
+    color: #fa0;
+}
+
+.callsign-invalid {
+    color: #f55;
+}
+
+/* Message system avec validation */
+.morse-line.system .callsign-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-left: 5px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+.morse-line.system .callsign-badge.valid {
+    background: #002200;
+    border: 1px solid #0f0;
+    color: #0f0;
+}
+
+.morse-line.system .callsign-badge.warning {
+    background: #1a1100;
+    border: 1px solid #fa0;
+    color: #fa0;
+}
+
+.morse-line.system .callsign-badge.invalid {
+    background: #220000;
+    border: 1px solid #f55;
+    color: #f55;
+}
