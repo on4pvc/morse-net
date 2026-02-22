@@ -131,101 +131,115 @@
         </div>
     </div>
 
-    <!-- Settings Modal -->
-    <div class="modal" id="settingsModal">
-        <div class="modal-content">
-            <div class="modal-header">⚙️ SETTINGS ⚙️</div>
+<!-- Settings Modal -->
+<div class="modal" id="settingsModal">
+    <div class="modal-content">
+        <div class="modal-header">⚙️ SETTINGS ⚙️</div>
 
-            <div class="setting-group">
-                <div class="setting-group-title">👤 Identité</div>
-                <label class="setting-label">CALLSIGN / USERNAME</label>
-                <input type="text" id="username" placeholder="Entrez votre indicatif..." value="VISITOR" maxlength="12">
-            </div>
-
-            <div class="setting-group">
-                <div class="setting-group-title">🎚️ Vitesse</div>
-                <label class="setting-label">SPEED (WPM)</label>
-                <input type="range" id="wpmSlider" min="5" max="50" value="20">
-                <div class="value-display" id="wpmValue">20 WPM</div>
-            </div>
-
-            <div class="setting-group">
-                <div class="setting-group-title">🔊 Audio</div>
-                <label class="setting-label">TONE FREQUENCY (Hz)</label>
-                <input type="range" id="freqSlider" min="300" max="1200" value="700">
-                <div class="value-display" id="freqValue">700 Hz</div>
-            </div>
-
-            <div class="setting-group">
-                <div class="setting-group-title">🎛️ Mode Keyer</div>
-                <label class="setting-label">IAMBIC MODE</label>
-                <select id="iambicMode">
-                    <option value="A">IAMBIC-A (Standard)</option>
-                    <option value="B" selected>IAMBIC-B (Alterné)</option>
-                </select>
-                
-                <div class="checkbox-group">
-                    <input type="checkbox" id="reverseKeys">
-                    <label class="setting-label" style="margin: 0; cursor: pointer;">REVERSE PADDLES (DIT ↔ DAH)</label>
-                </div>
-            </div>
-
-            <div class="setting-group bot-settings">
-                <div class="setting-group-title">🤖 Bot QSO (Practice)</div>
-                
-                <div class="setting-row">
-                    <div>
-                        <label class="setting-label">TYPE DE QSO</label>
-                        <select id="botQsoType">
-                            <option value="casual">Casual (Standard)</option>
-                            <option value="ragchew">Ragchew (Long)</option>
-                            <option value="contest">Contest (Rapide)</option>
-                            <option value="dx">DX (Minimal)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="setting-label">DIFFICULTÉ</label>
-                        <select id="botDifficulty">
-                            <option value="beginner">Débutant</option>
-                            <option value="intermediate">Intermédiaire</option>
-                            <option value="advanced">Avancé</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="botAutoStart" checked>
-                    <label class="setting-label" style="margin: 0; cursor: pointer;">Démarrer automatiquement le bot</label>
-                </div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="showBotAnalysis">
-                    <label class="setting-label" style="margin: 0; cursor: pointer;">Afficher l'analyse des messages (debug)</label>
-                </div>
-
-                <div class="info-box bot-info">
-                    🤖 <strong>Bot Intelligent:</strong> Le bot simule des QSO réalistes. 
-                    Il comprend vos messages et répond de manière contextuelle selon la procédure CW standard.
-                    Essayez d'appeler CQ ou répondez à son appel!
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <div class="setting-group-title">🔒 Canaux Privés</div>
-                <label class="setting-label">CRÉER / REJOINDRE DES CANAUX PRIVÉS</label>
-                <input type="text" id="privateChannels" placeholder="Ex: CLUB73, SECRET, TEAM-DX">
-                <div class="private-channels-info">
-                    💡 <strong>Comment ça marche:</strong><br>
-                    • Entrez les noms de canaux séparés par des virgules<br>
-                    • Seuls les utilisateurs avec le même nom verront ce canal<br>
-                    • Les canaux sont partagés en temps réel!
-                </div>
-                <button class="btn secondary" onclick="applyPrivateChannels()">✓ APPLIQUER CANAUX PRIVÉS</button>
-            </div>
-
-            <button class="btn close-btn" onclick="closeSettings()">✕ FERMER</button>
+        <div class="setting-group">
+            <div class="setting-group-title">👤 Identité</div>
+            <label class="setting-label">CALLSIGN / USERNAME</label>
+            <input type="text" id="username" placeholder="Entrez votre indicatif..." value="VISITOR" maxlength="12">
         </div>
+
+        <div class="setting-group">
+            <div class="setting-group-title">🎚️ Vitesse</div>
+            <label class="setting-label">SPEED (WPM)</label>
+            <input type="range" id="wpmSlider" min="5" max="50" value="20">
+            <div class="value-display" id="wpmValue">20 WPM</div>
+        </div>
+
+        <div class="setting-group">
+            <div class="setting-group-title">🔊 Audio</div>
+            <label class="setting-label">TONE FREQUENCY (Hz)</label>
+            <input type="range" id="freqSlider" min="300" max="1200" value="700">
+            <div class="value-display" id="freqValue">700 Hz</div>
+        </div>
+
+        <div class="setting-group">
+            <div class="setting-group-title">🎛️ Mode Keyer</div>
+            <label class="setting-label">IAMBIC MODE</label>
+            <select id="iambicMode">
+                <option value="A">IAMBIC-A (Standard)</option>
+                <option value="B" selected>IAMBIC-B (Alterné)</option>
+            </select>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="reverseKeys">
+                <label class="setting-label" style="margin: 0; cursor: pointer;">REVERSE PADDLES (DIT ↔ DAH)</label>
+            </div>
+        </div>
+
+        <!-- NOUVELLE SECTION AFFICHAGE -->
+        <div class="setting-group">
+            <div class="setting-group-title">📺 Affichage</div>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="showMorseCode" checked>
+                <label class="setting-label" style="margin: 0; cursor: pointer;">AFFICHER LE CODE MORSE (. et -)</label>
+            </div>
+            
+            <div class="info-box">
+                💡 Activez cette option pour voir le code morse (points et traits) 
+                au-dessus du texte décodé. Désactivez pour n'afficher que le texte.
+            </div>
+        </div>
+
+        <div class="setting-group bot-settings">
+            <div class="setting-group-title">🤖 Bot QSO (Practice)</div>
+            
+            <div class="setting-row">
+                <div>
+                    <label class="setting-label">TYPE DE QSO</label>
+                    <select id="botQsoType">
+                        <option value="casual">Casual (Standard)</option>
+                        <option value="ragchew">Ragchew (Long)</option>
+                        <option value="contest">Contest (Rapide)</option>
+                        <option value="dx">DX (Minimal)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="setting-label">DIFFICULTÉ</label>
+                    <select id="botDifficulty">
+                        <option value="beginner">Débutant</option>
+                        <option value="intermediate">Intermédiaire</option>
+                        <option value="advanced">Avancé</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="botAutoStart" checked>
+                <label class="setting-label" style="margin: 0; cursor: pointer;">Démarrer automatiquement le bot</label>
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="showBotAnalysis">
+                <label class="setting-label" style="margin: 0; cursor: pointer;">Afficher l'analyse des messages (debug)</label>
+            </div>
+
+            <div class="info-box bot-info">
+                🤖 <strong>Bot Intelligent:</strong> Le bot simule des QSO réalistes. 
+                Il comprend vos messages et répond de manière contextuelle selon la procédure CW standard.
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <div class="setting-group-title">🔒 Canaux Privés</div>
+            <label class="setting-label">CRÉER / REJOINDRE DES CANAUX PRIVÉS</label>
+            <input type="text" id="privateChannels" placeholder="Ex: CLUB73, SECRET, TEAM-DX">
+            <div class="private-channels-info">
+                💡 <strong>Comment ça marche:</strong><br>
+                • Entrez les noms de canaux séparés par des virgules<br>
+                • Seuls les utilisateurs avec le même nom verront ce canal<br>
+                • Les canaux sont partagés en temps réel!
+            </div>
+            <button class="btn secondary" onclick="applyPrivateChannels()">✓ APPLIQUER CANAUX PRIVÉS</button>
+        </div>
+
+        <button class="btn close-btn" onclick="closeSettings()">✕ FERMER</button>
     </div>
+</div>
 
     <!-- Socket.io -->
     <script src="/socket.io/socket.io.js"></script>
