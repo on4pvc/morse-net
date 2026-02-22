@@ -1,0 +1,20 @@
+{
+  "name": "morse-net",
+  "version": "2.1.0",
+  "description": "Morse Iambic Multi-Channel with real-time communication",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1"
+  },
+  "keywords": ["morse", "cw", "ham-radio", "iambic", "keyer"],
+  "author": "Your Name",
+  "license": "MIT"
+}
