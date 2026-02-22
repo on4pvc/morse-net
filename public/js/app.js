@@ -1,5 +1,6 @@
 // ========================================
-// MORSE NET v2.2 - Application JavaScript
+// MORSE NET v2.3 - Application JavaScript
+// Optimized Morse Decoding
 // ========================================
 
 // ========== SOCKET CONNECTION ==========
@@ -17,7 +18,8 @@ var config = {
     botQsoType: 'casual',
     botDifficulty: 'beginner',
     botAutoStart: true,
-    showBotAnalysis: false
+    showBotAnalysis: false,
+    showMorseCode: true  // Nouvelle option
 };
 
 var currentChannel = 'LOBBY';
@@ -59,7 +61,7 @@ var morseTable = {
     'Y': '-.--', 'Z': '--..', '1': '.----', '2': '..---', '3': '...--',
     '4': '....-', '5': '.....', '6': '-....', '7': '--...', '8': '---..',
     '9': '----.', '0': '-----', '/': '-..-.', '?': '..--..', '.': '.-.-.-',
-    ',': '--..--', '=': '-...-', '+': '.-.-.'
+    ',': '--..--', '=': '-...-', '+': '.-.-.', '-': '-....-'
 };
 
 var reverseMorseTable = {};
@@ -73,13 +75,15 @@ var keyerState = {
     dahPressed: false,
     isPlaying: false,
     lastElement: null,
-    currentMorse: '',
-    currentText: '',
+    currentMorse: '',           // Morse code of current character being formed
+    currentMorseDisplay: '',    // Full morse display for current line
+    currentText: '',            // Decoded text
     lastKeyTime: 0,
     currentLineElement: null,
     lineTimeout: null,
     letterTimeout: null,
-    wordTimeout: null
+    wordTimeout: null,
+    wordSpaceAdded: false       // Track if word space was already added
 };
 
 // ========== SOCKET EVENTS ==========
@@ -253,7 +257,13 @@ function resetBot() {
     socket.emit('resetBot');
 }
 
-// ========== TIMING ==========
+// ========== TIMING (Morse Standard) ==========
+// 1 unit = dit length
+// 3 units = dah length
+// 1 unit = space between elements (dit/dah) of same character
+// 3 units = space between characters of same word
+// 7 units = space between words
+
 function getDitLength() {
     return 1200 / config.wpm;
 }
@@ -263,15 +273,15 @@ function getDahLength() {
 }
 
 function getElementSpace() {
-    return getDitLength();
+    return getDitLength(); // 1 unit between elements
 }
 
 function getLetterSpace() {
-    return getDitLength() * 4;
+    return getDitLength() * 3; // 3 units between letters (no visual space)
 }
 
 function getWordSpace() {
-    return getDitLength() * 7;
+    return getDitLength() * 7; // 7 units between words (adds visual space)
 }
 
 // ========== AUDIO ==========
@@ -412,19 +422,32 @@ function playElement(element) {
     if (channelType === 'lobby') return;
     
     keyerState.isPlaying = true;
+    keyerState.wordSpaceAdded = false; // Reset word space flag when keying
     startTone();
     
     var duration = element === '.' ? getDitLength() : getDahLength();
     keyerState.currentMorse += element;
+    
+    // Add to morse display
+    if (keyerState.currentMorseDisplay.length > 0 && !keyerState.currentMorseDisplay.endsWith(' ') && !keyerState.currentMorseDisplay.endsWith('/')) {
+        // Check if this is a new character (after letter space)
+        // We don't add space here, we handle it in finalizeLetter
+    }
+    keyerState.currentMorseDisplay += element;
     
     var indicator = element === '.' ? 'ditIndicator' : 'dahIndicator';
     document.getElementById(indicator).classList.add('active');
     
     updateCurrentLine();
     
+    // Clear all pending timeouts when keying
     if (keyerState.letterTimeout) {
         clearTimeout(keyerState.letterTimeout);
         keyerState.letterTimeout = null;
+    }
+    if (keyerState.wordTimeout) {
+        clearTimeout(keyerState.wordTimeout);
+        keyerState.wordTimeout = null;
     }
     
     setTimeout(function() {
@@ -435,6 +458,7 @@ function playElement(element) {
         keyerState.lastKeyTime = Date.now();
         keyerState.lastElement = element;
         
+        // Set letter timeout (3 units) - finalizes the current character
         keyerState.letterTimeout = setTimeout(function() {
             finalizeLetter();
         }, getLetterSpace());
@@ -472,30 +496,49 @@ function processNextElement() {
 function finalizeLetter() {
     if (keyerState.currentMorse) {
         var letter = reverseMorseTable[keyerState.currentMorse];
+        
         if (letter) {
+            // Append letter directly without space (words are formed continuously)
             keyerState.currentText += letter;
         } else {
-            keyerState.currentText += '[' + keyerState.currentMorse + ']';
+            // Unknown morse code - show the raw morse
+            keyerState.currentText += '<?>';
         }
-        updateCurrentLine();
-        keyerState.currentMorse = '';
         
+        // Add space in morse display for next character
+        keyerState.currentMorseDisplay += ' ';
+        
+        keyerState.currentMorse = ''; // Reset current character morse
+        
+        updateCurrentLine();
+        
+        // Set word timeout (7 units) - adds space between words
         if (keyerState.wordTimeout) {
             clearTimeout(keyerState.wordTimeout);
         }
         keyerState.wordTimeout = setTimeout(function() {
-            if (keyerState.currentText && !keyerState.currentText.endsWith(' ')) {
-                keyerState.currentText += ' ';
-                updateCurrentLine();
-            }
-        }, getWordSpace() - getLetterSpace());
+            addWordSpace();
+        }, getWordSpace() - getLetterSpace()); // Subtract letter space already elapsed
         
+        // Set line finalization timeout (5 seconds of inactivity)
         if (keyerState.lineTimeout) {
             clearTimeout(keyerState.lineTimeout);
         }
         keyerState.lineTimeout = setTimeout(function() {
             finalizeLine();
         }, 5000);
+    }
+}
+
+function addWordSpace() {
+    if (!keyerState.wordSpaceAdded && keyerState.currentText.length > 0) {
+        // Only add space if text doesn't already end with space
+        if (!keyerState.currentText.endsWith(' ')) {
+            keyerState.currentText += ' ';
+            keyerState.currentMorseDisplay += '/ ';
+            keyerState.wordSpaceAdded = true;
+            updateCurrentLine();
+        }
     }
 }
 
@@ -510,23 +553,28 @@ function updateCurrentLine() {
     var morseCodeEl = keyerState.currentLineElement.querySelector('.morse-code');
     var morseTextEl = keyerState.currentLineElement.querySelector('.morse-text');
     
-    var displayMorse = '';
-    if (keyerState.currentText) {
-        var chars = keyerState.currentText.split('');
-        var morseParts = [];
-        for (var i = 0; i < chars.length; i++) {
-            var m = morseTable[chars[i]];
-            if (m) morseParts.push(m);
-            else if (chars[i] === ' ') morseParts.push('/');
-        }
-        displayMorse = morseParts.join(' ');
-    }
+    // Build display morse: finalized morse + current character being typed
+    var displayMorse = keyerState.currentMorseDisplay;
     if (keyerState.currentMorse) {
-        displayMorse += (displayMorse ? ' ' : '') + keyerState.currentMorse;
+        displayMorse += keyerState.currentMorse;
     }
     
-    morseCodeEl.textContent = displayMorse;
-    morseTextEl.innerHTML = keyerState.currentText + '<span class="cursor">▌</span>';
+    // Show or hide morse code based on settings
+    if (config.showMorseCode) {
+        morseCodeEl.textContent = displayMorse;
+        morseCodeEl.style.display = 'block';
+    } else {
+        morseCodeEl.style.display = 'none';
+    }
+    
+    // Show decoded text + current character being formed (if any)
+    var displayText = keyerState.currentText;
+    if (keyerState.currentMorse) {
+        // Show the morse being typed as a hint
+        displayText += '[' + keyerState.currentMorse + ']';
+    }
+    
+    morseTextEl.innerHTML = displayText + '<span class="cursor">▌</span>';
     
     scrollToBottom();
 }
@@ -537,11 +585,14 @@ function createNewLine() {
     
     var line = document.createElement('div');
     line.className = 'morse-line current';
+    
+    var morseCodeStyle = config.showMorseCode ? '' : 'style="display:none;"';
+    
     line.innerHTML = 
         '<span class="morse-timestamp">' + getTimestamp() + '</span>' +
         '<span class="morse-user">' + config.username + ':</span>' +
         '<div class="morse-content">' +
-            '<div class="morse-code"></div>' +
+            '<div class="morse-code" ' + morseCodeStyle + '></div>' +
             '<div class="morse-text"><span class="cursor">▌</span></div>' +
         '</div>';
     
@@ -556,21 +607,35 @@ function finalizeLine() {
         var cursor = keyerState.currentLineElement.querySelector('.cursor');
         if (cursor) cursor.remove();
         
-        if (keyerState.currentText.trim()) {
-            var text = keyerState.currentText.trim();
-            var morse = textToMorse(text);
+        // Clean up the text (trim trailing spaces)
+        var finalText = keyerState.currentText.trim();
+        var finalMorse = keyerState.currentMorseDisplay.trim();
+        
+        if (finalText) {
+            // Update the display one last time with clean text
+            var morseTextEl = keyerState.currentLineElement.querySelector('.morse-text');
+            morseTextEl.textContent = finalText;
             
+            var morseCodeEl = keyerState.currentLineElement.querySelector('.morse-code');
+            if (config.showMorseCode) {
+                morseCodeEl.textContent = finalMorse;
+            }
+            
+            // Send to server
             socket.emit('morseMessage', {
-                text: text,
-                morse: morse,
+                text: finalText,
+                morse: finalMorse,
                 channelId: currentChannel
             });
         }
     }
     
+    // Reset keyer state for next line
     keyerState.currentLineElement = null;
     keyerState.currentText = '';
     keyerState.currentMorse = '';
+    keyerState.currentMorseDisplay = '';
+    keyerState.wordSpaceAdded = false;
     
     if (keyerState.letterTimeout) clearTimeout(keyerState.letterTimeout);
     if (keyerState.wordTimeout) clearTimeout(keyerState.wordTimeout);
@@ -582,15 +647,23 @@ function finalizeLine() {
 
 function textToMorse(text) {
     var result = [];
-    for (var i = 0; i < text.length; i++) {
-        var char = text[i].toUpperCase();
-        if (morseTable[char]) {
-            result.push(morseTable[char]);
-        } else if (char === ' ') {
-            result.push('/');
+    var words = text.toUpperCase().split(' ');
+    
+    for (var w = 0; w < words.length; w++) {
+        var word = words[w];
+        var letterMorse = [];
+        
+        for (var i = 0; i < word.length; i++) {
+            var char = word[i];
+            if (morseTable[char]) {
+                letterMorse.push(morseTable[char]);
+            }
         }
+        
+        result.push(letterMorse.join(' '));
     }
-    return result.join(' ');
+    
+    return result.join(' / ');
 }
 
 // ========== KEYBOARD EVENTS ==========
@@ -648,6 +721,8 @@ function clearDisplay() {
     keyerState.currentLineElement = null;
     keyerState.currentText = '';
     keyerState.currentMorse = '';
+    keyerState.currentMorseDisplay = '';
+    keyerState.wordSpaceAdded = false;
     addSystemMessage('Display cleared');
 }
 
@@ -674,11 +749,15 @@ function addBotMessage(callsign, morse, text) {
     
     var line = document.createElement('div');
     line.className = 'morse-line bot-message';
+    
+    var morseDisplay = config.showMorseCode && morse ? morse : '';
+    var morseStyle = config.showMorseCode && morse ? '' : 'style="display:none;"';
+    
     line.innerHTML = 
         '<span class="morse-timestamp">' + getTimestamp() + '</span>' +
         '<span class="morse-user bot">🤖 ' + callsign + ':</span>' +
         '<div class="morse-content">' +
-            '<div class="morse-code">' + (morse || '') + '</div>' +
+            '<div class="morse-code" ' + morseStyle + '>' + morseDisplay + '</div>' +
             '<div class="morse-text">' + text + '</div>' +
         '</div>';
     
@@ -692,11 +771,15 @@ function addOtherUserMessage(username, morse, text) {
     
     var line = document.createElement('div');
     line.className = 'morse-line other-user';
+    
+    var morseDisplay = config.showMorseCode && morse ? morse : '';
+    var morseStyle = config.showMorseCode && morse ? '' : 'style="display:none;"';
+    
     line.innerHTML = 
         '<span class="morse-timestamp">' + getTimestamp() + '</span>' +
         '<span class="morse-user other">' + username + ':</span>' +
         '<div class="morse-content">' +
-            '<div class="morse-code">' + (morse || '') + '</div>' +
+            '<div class="morse-code" ' + morseStyle + '>' + morseDisplay + '</div>' +
             '<div class="morse-text">' + text + '</div>' +
         '</div>';
     
@@ -875,6 +958,7 @@ function closeSettings() {
     config.botDifficulty = document.getElementById('botDifficulty').value;
     config.botAutoStart = document.getElementById('botAutoStart').checked;
     config.showBotAnalysis = document.getElementById('showBotAnalysis').checked;
+    config.showMorseCode = document.getElementById('showMorseCode').checked;
     
     document.getElementById('wpmDisplay').textContent = config.wpm;
     document.getElementById('freqDisplay').textContent = config.frequency + ' Hz';
@@ -896,7 +980,21 @@ function closeSettings() {
         });
     }
     
+    // Update all morse code display visibility
+    updateMorseCodeVisibility();
+    
     renderChannels();
+}
+
+function updateMorseCodeVisibility() {
+    var morseCodeElements = document.querySelectorAll('.morse-code');
+    for (var i = 0; i < morseCodeElements.length; i++) {
+        if (config.showMorseCode) {
+            morseCodeElements[i].style.display = 'block';
+        } else {
+            morseCodeElements[i].style.display = 'none';
+        }
+    }
 }
 
 function applyPrivateChannels() {
@@ -941,6 +1039,7 @@ function loadSettings() {
             config.botDifficulty = settings.botDifficulty || 'beginner';
             config.botAutoStart = settings.botAutoStart !== false;
             config.showBotAnalysis = settings.showBotAnalysis || false;
+            config.showMorseCode = settings.showMorseCode !== false; // Default true
             
             document.getElementById('wpmSlider').value = config.wpm;
             document.getElementById('freqSlider').value = config.frequency;
@@ -952,6 +1051,7 @@ function loadSettings() {
             document.getElementById('botDifficulty').value = config.botDifficulty;
             document.getElementById('botAutoStart').checked = config.botAutoStart;
             document.getElementById('showBotAnalysis').checked = config.showBotAnalysis;
+            document.getElementById('showMorseCode').checked = config.showMorseCode;
             
             document.getElementById('wpmValue').textContent = config.wpm + ' WPM';
             document.getElementById('freqValue').textContent = config.frequency + ' Hz';
