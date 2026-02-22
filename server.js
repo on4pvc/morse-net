@@ -2,11 +2,11 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const CWBot = require('./bot/CWBot');
 
 const app = express();
 const server = http.createServer(app);
 
-// Configuration Socket.io pour production
 const io = socketIo(server, {
     cors: {
         origin: "*",
@@ -15,10 +15,8 @@ const io = socketIo(server, {
     transports: ['websocket', 'polling']
 });
 
-// Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Health check endpoint (pour les services de monitoring)
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok', uptime: process.uptime() });
 });
@@ -37,54 +35,127 @@ const channels = {
     CH8: { name: 'Channel 8', type: 'normal', users: new Map() }
 };
 
-// Private channels (dynamic)
 const privateChannels = new Map();
 
-// Statistics
-let stats = {
-    totalConnections: 0,
-    messagesTransmitted: 0,
-    startTime: Date.now()
-};
+// Bots par utilisateur (pour le mode Practice)
+const userBots = new Map();
 
-// Socket.io connection handling
 io.on('connection', (socket) => {
-    stats.totalConnections++;
-    console.log(`[${new Date().toISOString()}] User connected: ${socket.id} (Total: ${io.engine.clientsCount})`);
+    console.log(`User connected: ${socket.id}`);
     
     let currentUser = {
         id: socket.id,
         username: 'VISITOR',
-        channel: 'LOBBY',
-        connectedAt: Date.now()
+        channel: 'LOBBY'
     };
     
-    // Add user to lobby initially
+    // Créer un bot pour cet utilisateur
+    let userBot = null;
+    
     channels.LOBBY.users.set(socket.id, currentUser);
     broadcastChannelUsers();
     
-    // Send welcome message
-    socket.emit('welcome', {
-        serverId: 'morse-net-v2.1',
-        serverTime: Date.now(),
-        onlineUsers: io.engine.clientsCount
+    // ========== GESTION DU BOT ==========
+    
+    // Configurer le bot
+    socket.on('configureBot', (options) => {
+        if (userBot) {
+            userBot.setOptions(options);
+        }
+        socket.emit('botConfigured', userBot ? userBot.getState() : null);
     });
     
-    // Handle user joining a channel
+    // Démarrer un QSO avec le bot
+    socket.on('startBotQSO', (options = {}) => {
+        if (currentUser.channel !== 'PRACTICE') return;
+        
+        userBot = new CWBot({
+            qsoType: options.qsoType || 'casual',
+            difficulty: options.difficulty || 'beginner',
+            ...options
+        });
+        
+        const result = userBot.startNewQSO();
+        
+        // Envoyer le message initial du bot après un délai
+        setTimeout(() => {
+            if (result.response && result.response.text) {
+                socket.emit('botMessage', {
+                    callsign: result.botProfile.callsign,
+                    text: result.response.text,
+                    morse: result.response.morse,
+                    profile: result.botProfile,
+                    qsoState: result.qsoState
+                });
+            }
+        }, 2000);
+        
+        socket.emit('botStarted', {
+            profile: result.botProfile,
+            qsoState: result.qsoState
+        });
+    });
+    
+    // Envoyer un message au bot
+    socket.on('sendToBot', (data) => {
+        if (!userBot || currentUser.channel !== 'PRACTICE') return;
+        
+        const { text } = data;
+        const result = userBot.receiveMessage(text);
+        
+        // Répondre après un délai réaliste
+        const delay = 2000 + Math.random() * 3000;
+        
+        setTimeout(() => {
+            if (result.response && result.response.text) {
+                socket.emit('botMessage', {
+                    callsign: userBot.profile.callsign,
+                    text: result.response.text,
+                    morse: result.response.morse,
+                    analysis: result.analysis,
+                    qsoState: result.qsoState
+                });
+            }
+            
+            // Si le QSO est terminé, proposer d'en commencer un nouveau
+            if (result.qsoState.state === 'ended') {
+                setTimeout(() => {
+                    socket.emit('qsoEnded', {
+                        duration: result.qsoState.duration,
+                        exchanges: result.qsoState.exchangeCount
+                    });
+                }, 1000);
+            }
+        }, delay);
+        
+        // Envoyer l'analyse immédiatement
+        socket.emit('messageAnalysis', result.analysis);
+    });
+    
+    // Réinitialiser le bot
+    socket.on('resetBot', () => {
+        if (userBot) {
+            userBot.reset();
+            socket.emit('botReset', userBot.getState());
+        }
+    });
+    
+    // Obtenir l'état du bot
+    socket.on('getBotState', () => {
+        socket.emit('botState', userBot ? userBot.getState() : null);
+    });
+    
+    // ========== GESTION DES CANAUX ==========
+    
     socket.on('joinChannel', (data) => {
         const { channelId, username } = data;
+        if (!channelId) return;
         
-        // Validate input
-        if (!channelId || typeof channelId !== 'string') return;
-        
-        // Leave current channel
         leaveChannel(socket.id, currentUser.channel);
         
-        // Update user info
         currentUser.username = (username || 'VISITOR').substring(0, 12).toUpperCase();
         currentUser.channel = channelId;
         
-        // Check if it's a private channel
         if (channelId.startsWith('PRIV_')) {
             const privName = channelId.replace('PRIV_', '');
             if (!privateChannels.has(privName)) {
@@ -97,56 +168,64 @@ io.on('connection', (socket) => {
             socket.join(channelId);
         }
         
+        // Si on rejoint Practice, préparer le bot
+        if (channelId === 'PRACTICE') {
+            userBot = new CWBot({
+                qsoType: 'casual',
+                difficulty: 'beginner'
+            });
+            socket.emit('botReady', userBot.getState());
+        } else {
+            userBot = null;
+        }
+        
         broadcastChannelUsers();
         
-        // Notify others in the channel
         if (channelId !== 'LOBBY' && channelId !== 'PRACTICE') {
             socket.to(channelId).emit('userJoined', {
                 username: currentUser.username,
-                channelId: channelId,
-                timestamp: Date.now()
+                channelId: channelId
             });
         }
-        
-        console.log(`[${new Date().toISOString()}] ${currentUser.username} joined ${channelId}`);
     });
     
-    // Handle morse element (dit or dah) - real-time
-    socket.on('morseElement', (data) => {
-        const { element, channelId } = data;
-        
-        if (channelId === 'LOBBY' || channelId === 'PRACTICE') return;
-        if (!['dit', 'dah', '.', '-'].includes(element)) return;
-        
-        socket.to(channelId).emit('morseElement', {
-            element: element,
-            username: currentUser.username,
-            senderId: socket.id,
-            timestamp: Date.now()
-        });
-    });
-    
-    // Handle complete message
+    // Communication morse entre utilisateurs
     socket.on('morseMessage', (data) => {
         const { text, morse, channelId } = data;
         
-        if (channelId === 'LOBBY' || channelId === 'PRACTICE') return;
-        if (!text || typeof text !== 'string') return;
+        if (channelId === 'LOBBY') return;
         
-        stats.messagesTransmitted++;
+        // Mode Practice = envoyer au bot
+        if (channelId === 'PRACTICE' && userBot) {
+            socket.emit('userMessageSent', { text, morse });
+            
+            const result = userBot.receiveMessage(text);
+            
+            const delay = 2000 + Math.random() * 3000;
+            setTimeout(() => {
+                if (result.response && result.response.text) {
+                    socket.emit('botMessage', {
+                        callsign: userBot.profile.callsign,
+                        text: result.response.text,
+                        morse: result.response.morse,
+                        qsoState: result.qsoState
+                    });
+                }
+            }, delay);
+            
+            return;
+        }
         
+        // Mode normal = broadcast aux autres
         socket.to(channelId).emit('morseMessage', {
-            text: text.substring(0, 500), // Limit message length
+            text: text.substring(0, 500),
             morse: morse ? morse.substring(0, 2000) : '',
             username: currentUser.username,
             senderId: socket.id,
             timestamp: Date.now()
         });
-        
-        console.log(`[${new Date().toISOString()}] [${channelId}] ${currentUser.username}: ${text.substring(0, 50)}...`);
     });
     
-    // Handle real-time morse streaming (for live audio)
     socket.on('morseStart', (data) => {
         const { channelId } = data;
         if (channelId === 'LOBBY' || channelId === 'PRACTICE') return;
@@ -167,32 +246,26 @@ io.on('connection', (socket) => {
         });
     });
     
-    // Handle private channel creation
     socket.on('createPrivateChannel', (channelName) => {
-        if (!channelName || typeof channelName !== 'string') return;
-        
+        if (!channelName) return;
         const safeName = channelName.substring(0, 15).replace(/[^a-zA-Z0-9-_]/g, '');
         
         if (!privateChannels.has(safeName)) {
             privateChannels.set(safeName, { name: safeName, type: 'private', users: new Map() });
-            console.log(`[${new Date().toISOString()}] Private channel created: ${safeName}`);
         }
         socket.emit('privateChannelCreated', safeName);
     });
     
-    // Handle disconnect
-    socket.on('disconnect', (reason) => {
-        console.log(`[${new Date().toISOString()}] User disconnected: ${socket.id} (${reason})`);
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
         
-        // Remove from current channel
         leaveChannel(socket.id, currentUser.channel);
+        userBots.delete(socket.id);
         
-        // Notify others
         if (currentUser.channel !== 'LOBBY' && currentUser.channel !== 'PRACTICE') {
             socket.to(currentUser.channel).emit('userLeft', {
                 username: currentUser.username,
-                channelId: currentUser.channel,
-                timestamp: Date.now()
+                channelId: currentUser.channel
             });
         }
         
@@ -204,12 +277,10 @@ io.on('connection', (socket) => {
             const privName = channelId.replace('PRIV_', '');
             if (privateChannels.has(privName)) {
                 privateChannels.get(privName).users.delete(socketId);
-                // Clean up empty private channels after 5 minutes
                 if (privateChannels.get(privName).users.size === 0) {
                     setTimeout(() => {
                         if (privateChannels.has(privName) && privateChannels.get(privName).users.size === 0) {
                             privateChannels.delete(privName);
-                            console.log(`[${new Date().toISOString()}] Private channel deleted: ${privName}`);
                         }
                     }, 300000);
                 }
@@ -235,38 +306,20 @@ io.on('connection', (socket) => {
     }
 });
 
-// Cleanup inactive private channels every hour
-setInterval(() => {
-    for (const [name, channel] of privateChannels) {
-        if (channel.users.size === 0) {
-            privateChannels.delete(name);
-            console.log(`[${new Date().toISOString()}] Cleanup: Private channel deleted: ${name}`);
-        }
-    }
-}, 3600000);
-
-// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`
     ╔═══════════════════════════════════════════════════════╗
-    ║           ⚡ MORSE NET SERVER v2.1 ⚡                  ║
+    ║           ⚡ MORSE NET SERVER v2.2 ⚡                  ║
+    ║              WITH INTELLIGENT BOT                     ║
     ╠═══════════════════════════════════════════════════════╣
-    ║  Status:    ONLINE                                    ║
-    ║  Port:      ${PORT}                                        ║
-    ║  Time:      ${new Date().toISOString()}      ║
-    ║  Node:      ${process.version}                              ║
-    ╠═══════════════════════════════════════════════════════╣
-    ║  Ready for connections!                               ║
+    ║  Port: ${PORT}                                             ║
+    ║  Bot: CWBot v1.0 loaded                               ║
     ╚═══════════════════════════════════════════════════════╝
     `);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
-    console.log('SIGTERM received. Shutting down gracefully...');
-    server.close(() => {
-        console.log('Server closed.');
-        process.exit(0);
-    });
+    console.log('Shutting down...');
+    server.close(() => process.exit(0));
 });
