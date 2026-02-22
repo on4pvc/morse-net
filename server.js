@@ -37,9 +37,6 @@ const channels = {
 
 const privateChannels = new Map();
 
-// Bots par utilisateur
-let userBots = new Map();
-
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
     
@@ -58,7 +55,12 @@ io.on('connection', (socket) => {
     
     socket.on('configureBot', (options) => {
         if (userBot) {
-            userBot.setOptions(options);
+            // NOUVEAU: Passer le callsign de l'utilisateur
+            userBot.setOptions({
+                ...options,
+                userCallsign: currentUser.username
+            });
+            userBot.setUserCallsign(currentUser.username);
         }
         socket.emit('botConfigured', userBot ? userBot.getState() : null);
     });
@@ -66,13 +68,18 @@ io.on('connection', (socket) => {
     socket.on('startBotQSO', (options = {}) => {
         if (currentUser.channel !== 'PRACTICE') return;
         
+        // NOUVEAU: Créer le bot avec le callsign de l'utilisateur
         userBot = new CWBot({
             qsoType: options.qsoType || 'casual',
             difficulty: options.difficulty || 'beginner',
+            userCallsign: currentUser.username,  // NOUVEAU
             ...options
         });
         
-        const result = userBot.startNewQSO();
+        // NOUVEAU: S'assurer que le callsign est défini
+        userBot.setUserCallsign(currentUser.username);
+        
+        const result = userBot.startNewQSO(currentUser.username);
         
         setTimeout(() => {
             if (result.response && result.response.text) {
@@ -81,14 +88,16 @@ io.on('connection', (socket) => {
                     text: result.response.text,
                     morse: result.response.morse,
                     profile: result.botProfile,
-                    qsoState: result.qsoState
+                    qsoState: result.qsoState,
+                    userCallsign: currentUser.username  // NOUVEAU
                 });
             }
         }, 2000);
         
         socket.emit('botStarted', {
             profile: result.botProfile,
-            qsoState: result.qsoState
+            qsoState: result.qsoState,
+            userCallsign: currentUser.username  // NOUVEAU
         });
     });
     
@@ -96,6 +105,10 @@ io.on('connection', (socket) => {
         if (!userBot || currentUser.channel !== 'PRACTICE') return;
         
         const { text } = data;
+        
+        // NOUVEAU: S'assurer que le bot connaît le callsign de l'utilisateur
+        userBot.setUserCallsign(currentUser.username);
+        
         const result = userBot.receiveMessage(text);
         
         const delay = 2000 + Math.random() * 3000;
@@ -107,11 +120,13 @@ io.on('connection', (socket) => {
                     text: result.response.text,
                     morse: result.response.morse,
                     analysis: result.analysis,
-                    qsoState: result.qsoState
+                    qsoState: result.qsoState,
+                    // NOUVEAU: Informations sur le callsign
+                    userCallsignInfo: result.response.userCallsignInfo
                 });
             }
             
-            if (result.qsoState.state === 'ended') {
+            if (result.qsoState && result.qsoState.state === 'ended') {
                 setTimeout(() => {
                     socket.emit('qsoEnded', {
                         duration: result.qsoState.duration,
@@ -121,12 +136,23 @@ io.on('connection', (socket) => {
             }
         }, delay);
         
-        socket.emit('messageAnalysis', result.analysis);
+        // NOUVEAU: Envoyer l'analyse avec les infos de callsign
+        socket.emit('messageAnalysis', {
+            ...result.analysis,
+            userCallsignValidation: {
+                configured: currentUser.username,
+                detected: result.analysis.extracted.callsign,
+                match: result.analysis.detected.userCallsignMatch,
+                foundInMessage: result.analysis.detected.hasUserCallsign
+            }
+        });
     });
     
     socket.on('resetBot', () => {
         if (userBot) {
             userBot.reset();
+            // NOUVEAU: Conserver le callsign après reset
+            userBot.setUserCallsign(currentUser.username);
             socket.emit('botReset', userBot.getState());
         }
     });
@@ -141,10 +167,8 @@ io.on('connection', (socket) => {
         const { channelId, username } = data;
         if (!channelId) return;
         
-        // Leave current channel
         leaveChannel(socket.id, currentUser.channel);
         
-        // Update user info
         currentUser.username = (username || 'VISITOR').substring(0, 12).toUpperCase();
         currentUser.channel = channelId;
         
@@ -160,20 +184,25 @@ io.on('connection', (socket) => {
             socket.join(channelId);
         }
         
-        // Si on rejoint Practice, préparer le bot
         if (channelId === 'PRACTICE') {
+            // NOUVEAU: Créer le bot avec le callsign de l'utilisateur
             userBot = new CWBot({
                 qsoType: 'casual',
-                difficulty: 'beginner'
+                difficulty: 'beginner',
+                userCallsign: currentUser.username
             });
-            socket.emit('botReady', userBot.getState());
+            userBot.setUserCallsign(currentUser.username);
+            
+            socket.emit('botReady', {
+                ...userBot.getState(),
+                userCallsign: currentUser.username
+            });
         } else {
             userBot = null;
         }
         
         broadcastChannelUsers();
         
-        // Notify others in the channel
         if (channelId !== 'LOBBY' && channelId !== 'PRACTICE') {
             socket.to(channelId).emit('userJoined', {
                 username: currentUser.username,
@@ -182,15 +211,16 @@ io.on('connection', (socket) => {
         }
     });
     
-    // Communication morse entre utilisateurs
     socket.on('morseMessage', (data) => {
         const { text, morse, channelId } = data;
         
         if (channelId === 'LOBBY') return;
         
-        // Mode Practice = envoyer au bot
         if (channelId === 'PRACTICE' && userBot) {
             socket.emit('userMessageSent', { text, morse });
+            
+            // NOUVEAU: S'assurer que le bot connaît le callsign
+            userBot.setUserCallsign(currentUser.username);
             
             const result = userBot.receiveMessage(text);
             
@@ -201,7 +231,8 @@ io.on('connection', (socket) => {
                         callsign: userBot.profile.callsign,
                         text: result.response.text,
                         morse: result.response.morse,
-                        qsoState: result.qsoState
+                        qsoState: result.qsoState,
+                        userCallsignInfo: result.response.userCallsignInfo
                     });
                 }
                 
@@ -215,10 +246,20 @@ io.on('connection', (socket) => {
                 }
             }, delay);
             
+            // NOUVEAU: Envoyer la validation du callsign
+            socket.emit('messageAnalysis', {
+                ...result.analysis,
+                userCallsignValidation: {
+                    configured: currentUser.username,
+                    detected: result.analysis.extracted.callsign,
+                    match: result.analysis.detected.userCallsignMatch,
+                    foundInMessage: result.analysis.detected.hasUserCallsign
+                }
+            });
+            
             return;
         }
         
-        // Mode normal = broadcast aux autres
         socket.to(channelId).emit('morseMessage', {
             text: text.substring(0, 500),
             morse: morse ? morse.substring(0, 2000) : '',
@@ -262,7 +303,6 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
         
         leaveChannel(socket.id, currentUser.channel);
-        userBots.delete(socket.id);
         
         if (currentUser.channel !== 'LOBBY' && currentUser.channel !== 'PRACTICE') {
             socket.to(currentUser.channel).emit('userLeft', {
@@ -293,11 +333,9 @@ io.on('connection', (socket) => {
         socket.leave(channelId);
     }
     
-    // NOUVELLE FONCTION: Envoyer les détails des utilisateurs
     function broadcastChannelUsers() {
-        const channelDetails = {};
+        const channelDetailsData = {};
         
-        // Canaux publics
         for (const [id, channel] of Object.entries(channels)) {
             const users = [];
             channel.users.forEach((user) => {
@@ -307,13 +345,12 @@ io.on('connection', (socket) => {
                 });
             });
             
-            channelDetails[id] = {
+            channelDetailsData[id] = {
                 count: channel.users.size,
                 users: users
             };
         }
         
-        // Canaux privés
         for (const [name, channel] of privateChannels) {
             const users = [];
             channel.users.forEach((user) => {
@@ -323,13 +360,13 @@ io.on('connection', (socket) => {
                 });
             });
             
-            channelDetails['PRIV_' + name] = {
+            channelDetailsData['PRIV_' + name] = {
                 count: channel.users.size,
                 users: users
             };
         }
         
-        io.emit('channelUsers', channelDetails);
+        io.emit('channelUsers', channelDetailsData);
     }
 });
 
@@ -337,11 +374,11 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`
     ╔═══════════════════════════════════════════════════════╗
-    ║           ⚡ MORSE NET SERVER v2.3 ⚡                  ║
-    ║              WITH USER LIST                           ║
+    ║           ⚡ MORSE NET SERVER v2.4 ⚡                  ║
+    ║         WITH CALLSIGN VALIDATION                      ║
     ╠═══════════════════════════════════════════════════════╣
     ║  Port: ${PORT}                                             ║
-    ║  Bot: CWBot v1.0 loaded                               ║
+    ║  Bot: CWBot v1.1 with callsign detection              ║
     ╚═══════════════════════════════════════════════════════╝
     `);
 });
