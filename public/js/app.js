@@ -358,7 +358,7 @@ function getElementSpace() {
 }
 
 function getLetterSpace() {
-    return getDitLength() * 5;
+    return getDitLength() * 3;
 }
 
 function getWordSpace() {
