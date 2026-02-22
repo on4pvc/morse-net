@@ -37,8 +37,8 @@ const channels = {
 
 const privateChannels = new Map();
 
-// Bots par utilisateur (pour le mode Practice)
-const userBots = new Map();
+// Bots par utilisateur
+let userBots = new Map();
 
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
@@ -49,7 +49,6 @@ io.on('connection', (socket) => {
         channel: 'LOBBY'
     };
     
-    // Créer un bot pour cet utilisateur
     let userBot = null;
     
     channels.LOBBY.users.set(socket.id, currentUser);
@@ -57,7 +56,6 @@ io.on('connection', (socket) => {
     
     // ========== GESTION DU BOT ==========
     
-    // Configurer le bot
     socket.on('configureBot', (options) => {
         if (userBot) {
             userBot.setOptions(options);
@@ -65,7 +63,6 @@ io.on('connection', (socket) => {
         socket.emit('botConfigured', userBot ? userBot.getState() : null);
     });
     
-    // Démarrer un QSO avec le bot
     socket.on('startBotQSO', (options = {}) => {
         if (currentUser.channel !== 'PRACTICE') return;
         
@@ -77,7 +74,6 @@ io.on('connection', (socket) => {
         
         const result = userBot.startNewQSO();
         
-        // Envoyer le message initial du bot après un délai
         setTimeout(() => {
             if (result.response && result.response.text) {
                 socket.emit('botMessage', {
@@ -96,14 +92,12 @@ io.on('connection', (socket) => {
         });
     });
     
-    // Envoyer un message au bot
     socket.on('sendToBot', (data) => {
         if (!userBot || currentUser.channel !== 'PRACTICE') return;
         
         const { text } = data;
         const result = userBot.receiveMessage(text);
         
-        // Répondre après un délai réaliste
         const delay = 2000 + Math.random() * 3000;
         
         setTimeout(() => {
@@ -117,7 +111,6 @@ io.on('connection', (socket) => {
                 });
             }
             
-            // Si le QSO est terminé, proposer d'en commencer un nouveau
             if (result.qsoState.state === 'ended') {
                 setTimeout(() => {
                     socket.emit('qsoEnded', {
@@ -128,11 +121,9 @@ io.on('connection', (socket) => {
             }
         }, delay);
         
-        // Envoyer l'analyse immédiatement
         socket.emit('messageAnalysis', result.analysis);
     });
     
-    // Réinitialiser le bot
     socket.on('resetBot', () => {
         if (userBot) {
             userBot.reset();
@@ -140,7 +131,6 @@ io.on('connection', (socket) => {
         }
     });
     
-    // Obtenir l'état du bot
     socket.on('getBotState', () => {
         socket.emit('botState', userBot ? userBot.getState() : null);
     });
@@ -151,8 +141,10 @@ io.on('connection', (socket) => {
         const { channelId, username } = data;
         if (!channelId) return;
         
+        // Leave current channel
         leaveChannel(socket.id, currentUser.channel);
         
+        // Update user info
         currentUser.username = (username || 'VISITOR').substring(0, 12).toUpperCase();
         currentUser.channel = channelId;
         
@@ -181,6 +173,7 @@ io.on('connection', (socket) => {
         
         broadcastChannelUsers();
         
+        // Notify others in the channel
         if (channelId !== 'LOBBY' && channelId !== 'PRACTICE') {
             socket.to(channelId).emit('userJoined', {
                 username: currentUser.username,
@@ -210,6 +203,15 @@ io.on('connection', (socket) => {
                         morse: result.response.morse,
                         qsoState: result.qsoState
                     });
+                }
+                
+                if (result.qsoState && result.qsoState.state === 'ended') {
+                    setTimeout(() => {
+                        socket.emit('qsoEnded', {
+                            duration: result.qsoState.duration,
+                            exchanges: result.qsoState.exchangeCount
+                        });
+                    }, 1000);
                 }
             }, delay);
             
@@ -291,18 +293,43 @@ io.on('connection', (socket) => {
         socket.leave(channelId);
     }
     
+    // NOUVELLE FONCTION: Envoyer les détails des utilisateurs
     function broadcastChannelUsers() {
-        const channelCounts = {};
+        const channelDetails = {};
         
+        // Canaux publics
         for (const [id, channel] of Object.entries(channels)) {
-            channelCounts[id] = channel.users.size;
+            const users = [];
+            channel.users.forEach((user) => {
+                users.push({
+                    id: user.id,
+                    username: user.username
+                });
+            });
+            
+            channelDetails[id] = {
+                count: channel.users.size,
+                users: users
+            };
         }
         
+        // Canaux privés
         for (const [name, channel] of privateChannels) {
-            channelCounts['PRIV_' + name] = channel.users.size;
+            const users = [];
+            channel.users.forEach((user) => {
+                users.push({
+                    id: user.id,
+                    username: user.username
+                });
+            });
+            
+            channelDetails['PRIV_' + name] = {
+                count: channel.users.size,
+                users: users
+            };
         }
         
-        io.emit('channelUsers', channelCounts);
+        io.emit('channelUsers', channelDetails);
     }
 });
 
@@ -310,8 +337,8 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`
     ╔═══════════════════════════════════════════════════════╗
-    ║           ⚡ MORSE NET SERVER v2.2 ⚡                  ║
-    ║              WITH INTELLIGENT BOT                     ║
+    ║           ⚡ MORSE NET SERVER v2.3 ⚡                  ║
+    ║              WITH USER LIST                           ║
     ╠═══════════════════════════════════════════════════════╣
     ║  Port: ${PORT}                                             ║
     ║  Bot: CWBot v1.0 loaded                               ║
