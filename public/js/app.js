@@ -358,11 +358,11 @@ function getElementSpace() {
 }
 
 function getLetterSpace() {
-    return getDitLength() * 3;
+    return getDitLength() * 5;
 }
 
 function getWordSpace() {
-    return getDitLength() * 7;
+    return getDitLength() * 10;
 }
 
 // ========== AUDIO ==========
