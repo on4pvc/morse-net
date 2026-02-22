@@ -1058,3 +1058,169 @@ select option {
         padding: 2px 5px;
     }
 }
+/* ========== USER LIST IN CHANNELS ========== */
+.channel-users {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+    max-height: 40px;
+    overflow: hidden;
+}
+
+.channel-user-tag {
+    font-size: 9px;
+    color: #0a0;
+    background: #001a00;
+    padding: 2px 5px;
+    border: 1px solid #0a0;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.channel-item.active .channel-user-tag {
+    background: #002200;
+    border-color: #0ff;
+    color: #0ff;
+}
+
+.channel-item.lobby .channel-user-tag {
+    border-color: #808;
+    color: #f0f;
+}
+
+.channel-item.practice .channel-user-tag {
+    border-color: #a50;
+    color: #fa0;
+}
+
+.channel-item.private .channel-user-tag {
+    border-color: #aa0;
+    color: #ff0;
+}
+
+.channel-users-more {
+    font-size: 9px;
+    color: #0aa;
+    padding: 2px 5px;
+}
+
+/* ========== HEADER USER LIST ========== */
+.header-users {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    background: #001a00;
+    border-bottom: 2px solid #0a0;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.header-users-label {
+    color: #0aa;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.header-users-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1;
+}
+
+.header-user-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #002200;
+    border: 1px solid #0a0;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #0f0;
+}
+
+.header-user-badge.self {
+    background: #003333;
+    border-color: #0ff;
+    color: #0ff;
+}
+
+.header-user-badge .user-indicator {
+    width: 6px;
+    height: 6px;
+    background: #0f0;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+.header-user-badge.self .user-indicator {
+    background: #0ff;
+}
+
+.header-users-empty {
+    color: #555;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* Mode Lobby - users hidden */
+.header-users.lobby-mode {
+    background: #1a001a;
+    border-color: #808;
+}
+
+.header-users.lobby-mode .header-users-label {
+    color: #a0a;
+}
+
+.header-users.lobby-mode .header-users-empty {
+    color: #808;
+}
+
+/* Mode Practice */
+.header-users.practice-mode {
+    background: #1a1100;
+    border-color: #a50;
+}
+
+.header-users.practice-mode .header-users-label {
+    color: #a50;
+}
+
+.header-users.practice-mode .header-user-badge {
+    background: #1a1100;
+    border-color: #fa0;
+    color: #fa0;
+}
+
+/* Channel item with users - expand height */
+.channel-item.has-users {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.channel-item.has-users .channel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+/* ========== RESPONSIVE ADJUSTMENTS ========== */
+@media (max-width: 768px) {
+    .header-users {
+        padding: 6px 15px;
+    }
+    
+    .header-user-badge {
+        padding: 3px 8px;
+        font-size: 11px;
+    }
+    
+    .channel-users {
+        display: none;
+    }
+}
