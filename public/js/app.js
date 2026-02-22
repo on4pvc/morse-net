@@ -1,6 +1,6 @@
 // ========================================
 // MORSE NET v2.3 - Application JavaScript
-// Optimized Morse Decoding
+// With User List Display
 // ========================================
 
 // ========== SOCKET CONNECTION ==========
@@ -19,14 +19,16 @@ var config = {
     botDifficulty: 'beginner',
     botAutoStart: true,
     showBotAnalysis: false,
-    showMorseCode: true  // Nouvelle option
+    showMorseCode: true
 };
 
 var currentChannel = 'LOBBY';
 var audioContext = null;
 var oscillator = null;
 var gainNode = null;
-var channelUserCounts = {};
+
+// NOUVEAU: Stocke les détails des canaux (count + users)
+var channelDetails = {};
 
 // Bot state
 var botState = {
@@ -61,7 +63,7 @@ var morseTable = {
     'Y': '-.--', 'Z': '--..', '1': '.----', '2': '..---', '3': '...--',
     '4': '....-', '5': '.....', '6': '-....', '7': '--...', '8': '---..',
     '9': '----.', '0': '-----', '/': '-..-.', '?': '..--..', '.': '.-.-.-',
-    ',': '--..--', '=': '-...-', '+': '.-.-.', '-': '-....-'
+    ',': '--..--', '=': '-...-', '+': '.-.-.'
 };
 
 var reverseMorseTable = {};
@@ -75,15 +77,15 @@ var keyerState = {
     dahPressed: false,
     isPlaying: false,
     lastElement: null,
-    currentMorse: '',           // Morse code of current character being formed
-    currentMorseDisplay: '',    // Full morse display for current line
-    currentText: '',            // Decoded text
+    currentMorse: '',
+    currentMorseDisplay: '',
+    currentText: '',
     lastKeyTime: 0,
     currentLineElement: null,
     lineTimeout: null,
     letterTimeout: null,
     wordTimeout: null,
-    wordSpaceAdded: false       // Track if word space was already added
+    wordSpaceAdded: false
 };
 
 // ========== SOCKET EVENTS ==========
@@ -104,17 +106,19 @@ socket.on('disconnect', function() {
     console.log('Disconnected from server');
 });
 
-socket.on('channelUsers', function(counts) {
-    channelUserCounts = counts;
+// MODIFIÉ: Reçoit maintenant les détails complets
+socket.on('channelUsers', function(details) {
+    channelDetails = details;
     renderChannels();
+    updateHeaderUsers();
 });
 
 socket.on('userJoined', function(data) {
-    addSystemMessage(data.username + ' a rejoint le canal');
+    addSystemMessage('📥 ' + data.username + ' a rejoint le canal');
 });
 
 socket.on('userLeft', function(data) {
-    addSystemMessage(data.username + ' a quitté le canal');
+    addSystemMessage('📤 ' + data.username + ' a quitté le canal');
 });
 
 // ========== BOT EVENTS ==========
@@ -182,10 +186,6 @@ socket.on('messageAnalysis', function(analysis) {
         if (detected.length > 0) {
             addSystemMessage('📊 Détecté: ' + detected.join(', '));
         }
-        
-        if (analysis.extracted.callsign) {
-            addSystemMessage('📊 Callsign: ' + analysis.extracted.callsign);
-        }
     }
 });
 
@@ -212,6 +212,61 @@ function updateConnectionStatus(status) {
     } else {
         el.textContent = '⏳ Connecting...';
     }
+}
+
+// ========== HEADER USERS DISPLAY ==========
+function updateHeaderUsers() {
+    var headerUsers = document.getElementById('headerUsers');
+    var headerUsersList = document.getElementById('headerUsersList');
+    var channelInfo = channelData[currentChannel];
+    var channelType = channelInfo ? channelInfo.type : 'private';
+    
+    // Reset classes
+    headerUsers.className = 'header-users';
+    
+    // Mode Lobby - ne pas afficher les utilisateurs
+    if (channelType === 'lobby') {
+        headerUsers.classList.add('lobby-mode');
+        headerUsersList.innerHTML = '<span class="header-users-empty">🔇 Mode silencieux - Utilisateurs masqués</span>';
+        return;
+    }
+    
+    // Mode Practice
+    if (channelType === 'practice') {
+        headerUsers.classList.add('practice-mode');
+        headerUsersList.innerHTML = 
+            '<div class="header-user-badge self">' +
+                '<span class="user-indicator"></span>' +
+                '<span>' + config.username + ' (vous)</span>' +
+            '</div>' +
+            '<div class="header-user-badge">' +
+                '<span>🤖</span>' +
+                '<span>BOT CW</span>' +
+            '</div>';
+        return;
+    }
+    
+    // Canaux normaux et privés
+    var details = channelDetails[currentChannel];
+    
+    if (!details || !details.users || details.users.length === 0) {
+        headerUsersList.innerHTML = '<span class="header-users-empty">Aucun utilisateur dans ce canal</span>';
+        return;
+    }
+    
+    var html = '';
+    
+    for (var i = 0; i < details.users.length; i++) {
+        var user = details.users[i];
+        var isSelf = (user.username === config.username);
+        
+        html += '<div class="header-user-badge' + (isSelf ? ' self' : '') + '">' +
+                    '<span class="user-indicator"></span>' +
+                    '<span>' + user.username + (isSelf ? ' (vous)' : '') + '</span>' +
+                '</div>';
+    }
+    
+    headerUsersList.innerHTML = html;
 }
 
 // ========== BOT FUNCTIONS ==========
@@ -257,13 +312,7 @@ function resetBot() {
     socket.emit('resetBot');
 }
 
-// ========== TIMING (Morse Standard) ==========
-// 1 unit = dit length
-// 3 units = dah length
-// 1 unit = space between elements (dit/dah) of same character
-// 3 units = space between characters of same word
-// 7 units = space between words
-
+// ========== TIMING ==========
 function getDitLength() {
     return 1200 / config.wpm;
 }
@@ -273,15 +322,15 @@ function getDahLength() {
 }
 
 function getElementSpace() {
-    return getDitLength(); // 1 unit between elements
+    return getDitLength();
 }
 
 function getLetterSpace() {
-    return getDitLength() * 3; // 3 units between letters (no visual space)
+    return getDitLength() * 3;
 }
 
 function getWordSpace() {
-    return getDitLength() * 7; // 7 units between words (adds visual space)
+    return getDitLength() * 7;
 }
 
 // ========== AUDIO ==========
@@ -422,17 +471,11 @@ function playElement(element) {
     if (channelType === 'lobby') return;
     
     keyerState.isPlaying = true;
-    keyerState.wordSpaceAdded = false; // Reset word space flag when keying
+    keyerState.wordSpaceAdded = false;
     startTone();
     
     var duration = element === '.' ? getDitLength() : getDahLength();
     keyerState.currentMorse += element;
-    
-    // Add to morse display
-    if (keyerState.currentMorseDisplay.length > 0 && !keyerState.currentMorseDisplay.endsWith(' ') && !keyerState.currentMorseDisplay.endsWith('/')) {
-        // Check if this is a new character (after letter space)
-        // We don't add space here, we handle it in finalizeLetter
-    }
     keyerState.currentMorseDisplay += element;
     
     var indicator = element === '.' ? 'ditIndicator' : 'dahIndicator';
@@ -440,7 +483,6 @@ function playElement(element) {
     
     updateCurrentLine();
     
-    // Clear all pending timeouts when keying
     if (keyerState.letterTimeout) {
         clearTimeout(keyerState.letterTimeout);
         keyerState.letterTimeout = null;
@@ -458,7 +500,6 @@ function playElement(element) {
         keyerState.lastKeyTime = Date.now();
         keyerState.lastElement = element;
         
-        // Set letter timeout (3 units) - finalizes the current character
         keyerState.letterTimeout = setTimeout(function() {
             finalizeLetter();
         }, getLetterSpace());
@@ -498,29 +539,23 @@ function finalizeLetter() {
         var letter = reverseMorseTable[keyerState.currentMorse];
         
         if (letter) {
-            // Append letter directly without space (words are formed continuously)
             keyerState.currentText += letter;
         } else {
-            // Unknown morse code - show the raw morse
             keyerState.currentText += '<?>';
         }
         
-        // Add space in morse display for next character
         keyerState.currentMorseDisplay += ' ';
-        
-        keyerState.currentMorse = ''; // Reset current character morse
+        keyerState.currentMorse = '';
         
         updateCurrentLine();
         
-        // Set word timeout (7 units) - adds space between words
         if (keyerState.wordTimeout) {
             clearTimeout(keyerState.wordTimeout);
         }
         keyerState.wordTimeout = setTimeout(function() {
             addWordSpace();
-        }, getWordSpace() - getLetterSpace()); // Subtract letter space already elapsed
+        }, getWordSpace() - getLetterSpace());
         
-        // Set line finalization timeout (5 seconds of inactivity)
         if (keyerState.lineTimeout) {
             clearTimeout(keyerState.lineTimeout);
         }
@@ -532,7 +567,6 @@ function finalizeLetter() {
 
 function addWordSpace() {
     if (!keyerState.wordSpaceAdded && keyerState.currentText.length > 0) {
-        // Only add space if text doesn't already end with space
         if (!keyerState.currentText.endsWith(' ')) {
             keyerState.currentText += ' ';
             keyerState.currentMorseDisplay += '/ ';
@@ -553,13 +587,11 @@ function updateCurrentLine() {
     var morseCodeEl = keyerState.currentLineElement.querySelector('.morse-code');
     var morseTextEl = keyerState.currentLineElement.querySelector('.morse-text');
     
-    // Build display morse: finalized morse + current character being typed
     var displayMorse = keyerState.currentMorseDisplay;
     if (keyerState.currentMorse) {
         displayMorse += keyerState.currentMorse;
     }
     
-    // Show or hide morse code based on settings
     if (config.showMorseCode) {
         morseCodeEl.textContent = displayMorse;
         morseCodeEl.style.display = 'block';
@@ -567,10 +599,8 @@ function updateCurrentLine() {
         morseCodeEl.style.display = 'none';
     }
     
-    // Show decoded text + current character being formed (if any)
     var displayText = keyerState.currentText;
     if (keyerState.currentMorse) {
-        // Show the morse being typed as a hint
         displayText += '[' + keyerState.currentMorse + ']';
     }
     
@@ -607,12 +637,10 @@ function finalizeLine() {
         var cursor = keyerState.currentLineElement.querySelector('.cursor');
         if (cursor) cursor.remove();
         
-        // Clean up the text (trim trailing spaces)
         var finalText = keyerState.currentText.trim();
         var finalMorse = keyerState.currentMorseDisplay.trim();
         
         if (finalText) {
-            // Update the display one last time with clean text
             var morseTextEl = keyerState.currentLineElement.querySelector('.morse-text');
             morseTextEl.textContent = finalText;
             
@@ -621,7 +649,6 @@ function finalizeLine() {
                 morseCodeEl.textContent = finalMorse;
             }
             
-            // Send to server
             socket.emit('morseMessage', {
                 text: finalText,
                 morse: finalMorse,
@@ -630,7 +657,6 @@ function finalizeLine() {
         }
     }
     
-    // Reset keyer state for next line
     keyerState.currentLineElement = null;
     keyerState.currentText = '';
     keyerState.currentMorse = '';
@@ -809,6 +835,7 @@ function renderChannels() {
     var channelsList = document.getElementById('channelsList');
     channelsList.innerHTML = '';
 
+    // Special channels
     var specialSection = document.createElement('div');
     specialSection.className = 'channel-section';
     specialSection.innerHTML = '<div class="channel-section-title">📌 SPECIAL</div>';
@@ -822,6 +849,7 @@ function renderChannels() {
     }
     channelsList.appendChild(specialSection);
 
+    // Public channels
     var publicSection = document.createElement('div');
     publicSection.className = 'channel-section';
     publicSection.innerHTML = '<div class="channel-section-title">📡 PUBLIC CHANNELS</div>';
@@ -835,6 +863,7 @@ function renderChannels() {
     }
     channelsList.appendChild(publicSection);
 
+    // Private channels
     if (config.privateChannels.length > 0) {
         var privateSection = document.createElement('div');
         privateSection.className = 'channel-section';
@@ -843,24 +872,7 @@ function renderChannels() {
         for (var k = 0; k < config.privateChannels.length; k++) {
             var name = config.privateChannels[k];
             var privId = 'PRIV_' + name;
-            var privItem = document.createElement('div');
-            privItem.className = 'channel-item private';
-            if (currentChannel === privId) privItem.classList.add('active');
-            
-            var privUsers = channelUserCounts[privId] || 0;
-            privItem.innerHTML = 
-                '<span class="channel-name">' + name + '</span>' +
-                '<div class="channel-info">' +
-                    '<span class="user-count">👥 ' + privUsers + '</span>' +
-                    '<span class="channel-status ' + (currentChannel === privId ? 'active-status' : '') + '"></span>' +
-                '</div>';
-            
-            (function(pName, pPrivId) {
-                privItem.onclick = function() {
-                    switchChannel(pPrivId, pName, 'Canal privé');
-                };
-            })(name, privId);
-            
+            var privItem = createPrivateChannelItem(privId, name);
             privateSection.appendChild(privItem);
         }
         channelsList.appendChild(privateSection);
@@ -870,23 +882,48 @@ function renderChannels() {
 }
 
 function createChannelItem(id, channel) {
+    var details = channelDetails[id] || { count: 0, users: [] };
+    var hasUsers = details.users && details.users.length > 0;
+    
     var item = document.createElement('div');
     item.className = 'channel-item ' + channel.type;
     if (currentChannel === id) item.classList.add('active');
+    if (hasUsers) item.classList.add('has-users');
     
-    var userCount = channelUserCounts[id] || 0;
-    var displayUsers = userCount;
-    
+    var displayUsers = details.count;
     if (id === 'PRACTICE') {
         displayUsers = '🤖 BOT';
     }
     
-    item.innerHTML = 
-        '<span class="channel-name">' + channel.name + '</span>' +
-        '<div class="channel-info">' +
-            '<span class="user-count">👥 ' + displayUsers + '</span>' +
-            '<span class="channel-status ' + (currentChannel === id ? 'active-status' : '') + '"></span>' +
+    // Header du canal
+    var headerHtml = 
+        '<div class="channel-header">' +
+            '<span class="channel-name">' + channel.name + '</span>' +
+            '<div class="channel-info">' +
+                '<span class="user-count">👥 ' + displayUsers + '</span>' +
+                '<span class="channel-status ' + (currentChannel === id ? 'active-status' : '') + '"></span>' +
+            '</div>' +
         '</div>';
+    
+    // Liste des utilisateurs (sauf pour Lobby et Practice)
+    var usersHtml = '';
+    if (channel.type !== 'lobby' && channel.type !== 'practice' && hasUsers) {
+        usersHtml = '<div class="channel-users">';
+        var maxDisplay = 4;
+        
+        for (var i = 0; i < Math.min(details.users.length, maxDisplay); i++) {
+            var user = details.users[i];
+            usersHtml += '<span class="channel-user-tag">' + user.username + '</span>';
+        }
+        
+        if (details.users.length > maxDisplay) {
+            usersHtml += '<span class="channel-users-more">+' + (details.users.length - maxDisplay) + '</span>';
+        }
+        
+        usersHtml += '</div>';
+    }
+    
+    item.innerHTML = headerHtml + usersHtml;
     
     (function(channelId, channelName, channelDesc) {
         item.onclick = function() {
@@ -895,6 +932,52 @@ function createChannelItem(id, channel) {
     })(id, channel.name, channel.description);
     
     return item;
+}
+
+function createPrivateChannelItem(privId, name) {
+    var details = channelDetails[privId] || { count: 0, users: [] };
+    var hasUsers = details.users && details.users.length > 0;
+    
+    var privItem = document.createElement('div');
+    privItem.className = 'channel-item private';
+    if (currentChannel === privId) privItem.classList.add('active');
+    if (hasUsers) privItem.classList.add('has-users');
+    
+    var headerHtml = 
+        '<div class="channel-header">' +
+            '<span class="channel-name">' + name + '</span>' +
+            '<div class="channel-info">' +
+                '<span class="user-count">👥 ' + details.count + '</span>' +
+                '<span class="channel-status ' + (currentChannel === privId ? 'active-status' : '') + '"></span>' +
+            '</div>' +
+        '</div>';
+    
+    var usersHtml = '';
+    if (hasUsers) {
+        usersHtml = '<div class="channel-users">';
+        var maxDisplay = 4;
+        
+        for (var i = 0; i < Math.min(details.users.length, maxDisplay); i++) {
+            var user = details.users[i];
+            usersHtml += '<span class="channel-user-tag">' + user.username + '</span>';
+        }
+        
+        if (details.users.length > maxDisplay) {
+            usersHtml += '<span class="channel-users-more">+' + (details.users.length - maxDisplay) + '</span>';
+        }
+        
+        usersHtml += '</div>';
+    }
+    
+    privItem.innerHTML = headerHtml + usersHtml;
+    
+    (function(pName, pPrivId) {
+        privItem.onclick = function() {
+            switchChannel(pPrivId, pName, 'Canal privé');
+        };
+    })(name, privId);
+    
+    return privItem;
 }
 
 function switchChannel(id, name, description) {
@@ -933,12 +1016,15 @@ function switchChannel(id, name, description) {
     }
     
     renderChannels();
+    updateHeaderUsers();
 }
 
 function updateTotalUsers() {
     var total = 0;
-    for (var id in channelUserCounts) {
-        total += channelUserCounts[id];
+    for (var id in channelDetails) {
+        if (channelDetails[id] && channelDetails[id].count) {
+            total += channelDetails[id].count;
+        }
     }
     document.getElementById('totalUsers').textContent = '👥 ' + total + ' online';
 }
@@ -980,10 +1066,9 @@ function closeSettings() {
         });
     }
     
-    // Update all morse code display visibility
     updateMorseCodeVisibility();
-    
     renderChannels();
+    updateHeaderUsers();
 }
 
 function updateMorseCodeVisibility() {
@@ -1039,7 +1124,7 @@ function loadSettings() {
             config.botDifficulty = settings.botDifficulty || 'beginner';
             config.botAutoStart = settings.botAutoStart !== false;
             config.showBotAnalysis = settings.showBotAnalysis || false;
-            config.showMorseCode = settings.showMorseCode !== false; // Default true
+            config.showMorseCode = settings.showMorseCode !== false;
             
             document.getElementById('wpmSlider').value = config.wpm;
             document.getElementById('freqSlider').value = config.frequency;
@@ -1077,6 +1162,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
     renderChannels();
     updateConnectionStatus('connecting');
+    updateHeaderUsers();
 });
 
 document.addEventListener('contextmenu', function(e) {
